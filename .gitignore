@@ -1,5 +1,6 @@
 # 依赖
 node_modules/
+package-lock.json
 
 # 环境配置 (包含敏感信息)
 .env
