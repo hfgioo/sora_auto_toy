@@ -1,0 +1,21 @@
+{
+  "name": "sora-auto-toy",
+  "version": "1.0.0",
+  "description": "Sora/OpenAI 自动化注册工具",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": ["sora", "openai", "automation", "puppeteer"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "xlsx": "^0.18.5",
+    "dotenv": "^16.4.0"
+  }
+}

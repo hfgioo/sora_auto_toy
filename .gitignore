@@ -1,0 +1,30 @@
+# 依赖
+node_modules/
+
+# 环境配置 (包含敏感信息)
+.env
+
+# 账户数据 (敏感信息)
+accounts.xlsx
+
+# 日志文件
+*.log
+
+# 截图目录
+screenshots/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 调试文件
+debug-*.png
+
+# Claude Code 本地配置
+.claude/
