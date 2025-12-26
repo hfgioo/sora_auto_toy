@@ -97,7 +97,6 @@ async function registerOne(browser, index) {
   let password = config.defaultPassword || generatePassword();
   let status = '失败';
   let sessionToken = null;
-  let refreshToken = null;
   let accessToken = null;
 
   try {
@@ -117,7 +116,7 @@ async function registerOne(browser, index) {
       status = '成功';
       logger.success(`账户 ${email} 注册成功！`);
 
-      // 4. 获取 Session Token 和 Refresh Token
+      // 4. 获取 Session Token
       const tokenResult = await register.getSessionToken();
       if (tokenResult.sessionToken) {
         sessionToken = tokenResult.sessionToken;
@@ -132,23 +131,18 @@ async function registerOne(browser, index) {
       } else {
         logger.warn('未能获取 Session Token，但账户注册成功');
       }
-      if (tokenResult.refreshToken) {
-        refreshToken = tokenResult.refreshToken;
-        logger.success(`已获取 Refresh Token (长度: ${refreshToken.length})`);
-      }
     }
   } catch (error) {
     logger.error(`注册失败: ${error.message}`);
     status = `失败: ${error.message}`;
   } finally {
-    // 只保存成功的账户到 Excel
+    // 只保存成功的账户到 Excel 和 JSON
     if (email && status === '成功') {
       await saveAccount({
         email,
         password,
         status,
         sessionToken,
-        refreshToken,
         accessToken,
         createdAt: new Date().toISOString()
       });

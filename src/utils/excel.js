@@ -1,17 +1,70 @@
 /**
- * Excel 导出工具
+ * Excel 和 JSON 导出工具
  */
 import * as XLSX from 'xlsx';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { logger } from './logger.js';
 
 const EXCEL_FILE = 'accounts.xlsx';
+const ACCESS_TOKEN_FILE = 'access_tokens.json';
 
 /**
  * 延迟函数
  */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 获取当前日期字符串 (YYYY-MM-DD)
+ */
+function getDateString() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 保存 Access Token 到 JSON 文件（按日期分区）
+ * @param {Object} tokenData - Token 数据
+ * @param {string} tokenData.email - 邮箱
+ * @param {string} tokenData.accessToken - Access Token
+ * @param {string} tokenData.createdAt - 创建时间
+ */
+function saveAccessToken(tokenData) {
+  if (!tokenData.accessToken) {
+    return;
+  }
+
+  try {
+    let jsonData = {};
+
+    // 如果文件存在，读取现有数据
+    if (existsSync(ACCESS_TOKEN_FILE)) {
+      const content = readFileSync(ACCESS_TOKEN_FILE, 'utf-8');
+      jsonData = JSON.parse(content);
+    }
+
+    // 获取当前日期作为分区 key
+    const dateKey = getDateString();
+
+    // 确保日期分区存在
+    if (!jsonData[dateKey]) {
+      jsonData[dateKey] = [];
+    }
+
+    // 添加新的 token
+    jsonData[dateKey].push({
+      email: tokenData.email,
+      accessToken: tokenData.accessToken,
+      createdAt: tokenData.createdAt || new Date().toISOString()
+    });
+
+    // 写入文件
+    writeFileSync(ACCESS_TOKEN_FILE, JSON.stringify(jsonData, null, 2), 'utf-8');
+    logger.success(`Access Token 已保存到 ${ACCESS_TOKEN_FILE} (分区: ${dateKey})`);
+  } catch (error) {
+    logger.error(`保存 Access Token JSON 失败: ${error.message}`);
+  }
 }
 
 /**
@@ -22,10 +75,19 @@ function sleep(ms) {
  * @param {string} account.status - 状态
  * @param {string} account.createdAt - 创建时间
  * @param {string} account.sessionToken - Session Token (可选)
- * @param {string} account.refreshToken - Refresh Token (可选)
  * @param {string} account.accessToken - Access Token (可选)
  */
 export async function saveAccount(account, retries = 3) {
+  // 先保存 Access Token 到 JSON
+  if (account.accessToken) {
+    saveAccessToken({
+      email: account.email,
+      accessToken: account.accessToken,
+      createdAt: account.createdAt
+    });
+  }
+
+  // 保存到 Excel
   for (let i = 0; i < retries; i++) {
     try {
       let workbook;
@@ -46,7 +108,6 @@ export async function saveAccount(account, retries = 3) {
         '密码': account.password,
         '状态': account.status,
         'Session Token': account.sessionToken || '',
-        'Refresh Token': account.refreshToken || '',
         'Access Token': account.accessToken || '',
         '创建时间': account.createdAt || new Date().toISOString()
       });
@@ -60,7 +121,6 @@ export async function saveAccount(account, retries = 3) {
         { wch: 25 },  // 密码
         { wch: 15 },  // 状态
         { wch: 100 }, // Session Token
-        { wch: 100 }, // Refresh Token
         { wch: 150 }, // Access Token (JWT 较长)
         { wch: 25 }   // 创建时间
       ];
@@ -98,4 +158,28 @@ export function getAccounts() {
   const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
   return XLSX.utils.sheet_to_json(worksheet);
+}
+
+/**
+ * 获取所有 Access Token（按日期分区）
+ * @returns {Object} 按日期分区的 Access Token 数据
+ */
+export function getAccessTokens() {
+  if (!existsSync(ACCESS_TOKEN_FILE)) {
+    return {};
+  }
+
+  const content = readFileSync(ACCESS_TOKEN_FILE, 'utf-8');
+  return JSON.parse(content);
+}
+
+/**
+ * 获取指定日期的 Access Token 列表
+ * @param {string} date - 日期字符串 (YYYY-MM-DD)，默认为今天
+ * @returns {Array} Access Token 列表
+ */
+export function getAccessTokensByDate(date = null) {
+  const tokens = getAccessTokens();
+  const dateKey = date || getDateString();
+  return tokens[dateKey] || [];
 }
