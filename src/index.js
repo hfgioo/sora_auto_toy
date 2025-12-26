@@ -98,6 +98,7 @@ async function registerOne(browser, index) {
   let status = '失败';
   let sessionToken = null;
   let refreshToken = null;
+  let accessToken = null;
 
   try {
     // 1. 获取临时邮箱
@@ -121,6 +122,13 @@ async function registerOne(browser, index) {
       if (tokenResult.sessionToken) {
         sessionToken = tokenResult.sessionToken;
         logger.success(`已获取 Session Token (长度: ${sessionToken.length})`);
+
+        // 5. 将 Session Token 转换为 Access Token
+        const atResult = await register.sessionToAccessToken(sessionToken);
+        if (atResult.accessToken) {
+          accessToken = atResult.accessToken;
+          logger.success(`已获取 Access Token (长度: ${accessToken.length})`);
+        }
       } else {
         logger.warn('未能获取 Session Token，但账户注册成功');
       }
@@ -141,6 +149,7 @@ async function registerOne(browser, index) {
         status,
         sessionToken,
         refreshToken,
+        accessToken,
         createdAt: new Date().toISOString()
       });
     }

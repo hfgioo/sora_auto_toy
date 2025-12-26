@@ -1035,6 +1035,125 @@ export class OpenAIRegister {
   }
 
   /**
+   * 将 Session Token 转换为 Access Token
+   * @param {string} sessionToken - Session Token
+   * @returns {Promise<Object>} 包含 accessToken 和用户信息的对象
+   */
+  async sessionToAccessToken(sessionToken) {
+    logger.info('正在将 Session Token 转换为 Access Token...');
+
+    if (!sessionToken) {
+      logger.error('Session Token 为空，无法转换');
+      return { accessToken: null, user: null, expires: null };
+    }
+
+    try {
+      // 使用 Puppeteer 发起请求（利用现有页面的网络环境和代理）
+      const result = await this.page.evaluate(async (st) => {
+        try {
+          const response = await fetch('https://sora.chatgpt.com/api/auth/session', {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Cookie': `__Secure-next-auth.session-token=${st}`,
+              'Origin': 'https://sora.chatgpt.com',
+              'Referer': 'https://sora.chatgpt.com/'
+            },
+            credentials: 'include'
+          });
+
+          if (!response.ok) {
+            return { error: `HTTP ${response.status}: ${response.statusText}` };
+          }
+
+          const data = await response.json();
+          return data;
+        } catch (e) {
+          return { error: e.message };
+        }
+      }, sessionToken);
+
+      if (result.error) {
+        // 如果页面内 fetch 失败，尝试通过导航到 session API 获取
+        logger.warn(`页面内请求失败: ${result.error}，尝试直接导航获取...`);
+
+        // 先设置 Cookie
+        await this.page.setCookie({
+          name: '__Secure-next-auth.session-token',
+          value: sessionToken,
+          domain: '.chatgpt.com',
+          path: '/',
+          secure: true,
+          httpOnly: true
+        });
+
+        // 导航到 session API
+        const response = await this.page.goto('https://sora.chatgpt.com/api/auth/session', {
+          waitUntil: 'networkidle0',
+          timeout: 30000
+        });
+
+        if (response && response.ok()) {
+          const content = await this.page.content();
+          // 提取 JSON 内容
+          const jsonMatch = content.match(/<pre[^>]*>([\s\S]*?)<\/pre>/);
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[1]);
+            if (data.accessToken) {
+              logger.success('成功获取 Access Token');
+              logger.info(`用户邮箱: ${data.user?.email || '未知'}`);
+              logger.info(`过期时间: ${data.expires || '未知'}`);
+              return {
+                accessToken: data.accessToken,
+                user: data.user || null,
+                expires: data.expires || null
+              };
+            }
+          }
+
+          // 尝试直接解析页面文本
+          const text = await this.page.evaluate(() => document.body.innerText);
+          try {
+            const data = JSON.parse(text);
+            if (data.accessToken) {
+              logger.success('成功获取 Access Token');
+              return {
+                accessToken: data.accessToken,
+                user: data.user || null,
+                expires: data.expires || null
+              };
+            }
+          } catch (e) {
+            // 解析失败
+          }
+        }
+
+        logger.error('无法获取 Access Token');
+        return { accessToken: null, user: null, expires: null };
+      }
+
+      // 成功获取
+      if (result.accessToken) {
+        logger.success('成功获取 Access Token');
+        logger.info(`用户邮箱: ${result.user?.email || '未知'}`);
+        logger.info(`过期时间: ${result.expires || '未知'}`);
+        return {
+          accessToken: result.accessToken,
+          user: result.user || null,
+          expires: result.expires || null
+        };
+      }
+
+      logger.warn('返回数据中没有 accessToken');
+      return { accessToken: null, user: result.user || null, expires: null };
+    } catch (error) {
+      logger.error(`转换 Access Token 失败: ${error.message}`);
+      return { accessToken: null, user: null, expires: null };
+    }
+  }
+
+  /**
    * 获取当前页面
    */
   getPage() {
