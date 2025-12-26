@@ -223,19 +223,65 @@ export class OpenAIRegister {
     this.page = await this.browser.newPage();
 
     // 设置 viewport
-    await this.page.setViewport({ width: 1280, height: 800 });
+    await this.page.setViewport({ width: 1920, height: 1080 });
 
     // 设置超时
     this.page.setDefaultTimeout(30000);
     this.page.setDefaultNavigationTimeout(60000);
 
-    // 设置 User-Agent
+    // 设置更真实的 User-Agent
     await this.page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     );
 
+    // 设置额外的 HTTP 头
+    await this.page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1'
+    });
+
+    // 注入反检测脚本
+    await this.page.evaluateOnNewDocument(() => {
+      // 覆盖 webdriver 属性
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined
+      });
+
+      // 覆盖 plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5]
+      });
+
+      // 覆盖 languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en']
+      });
+
+      // 覆盖 chrome 对象
+      window.chrome = {
+        runtime: {}
+      };
+
+      // 覆盖权限查询
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+    });
+
     await this.page.goto('https://sora.com/', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle2',
       timeout: 60000
     });
 

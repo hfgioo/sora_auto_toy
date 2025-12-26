@@ -197,20 +197,38 @@ async function main() {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
         '--window-size=1920,1080',
         // 反检测参数
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',
-        '--disable-extensions',
-        '--disable-plugins-discovery',
-        '--lang=zh-CN,zh',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-features=TranslateUI',
+        '--disable-hang-monitor',
+        '--disable-ipc-flooding-protection',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--disable-renderer-backgrounding',
+        '--disable-sync',
+        '--enable-features=NetworkService,NetworkServiceInProcess',
+        '--force-color-profile=srgb',
+        '--metrics-recording-only',
+        '--password-store=basic',
+        '--use-mock-keychain',
+        '--lang=en-US,en',
       ],
       defaultViewport: {
         width: 1920,
         height: 1080
       },
-      ignoreDefaultArgs: ['--enable-automation']
+      ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
     };
 
     // 如果配置了本地 Chrome 路径，使用本地 Chrome
