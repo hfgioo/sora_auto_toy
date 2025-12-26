@@ -90,7 +90,36 @@ export class OpenAIRegister {
   }
 
   /**
-   * 安全执行 evaluate（处理页面导航导致的上下文销毁）
+   * 随机延迟函数（模拟人类行为）
+   */
+  async randomDelay(min = 1000, max = 3000) {
+    const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+    logger.info(`等待 ${(delay / 1000).toFixed(1)} 秒...`);
+    return this.sleep(delay);
+  }
+
+  /**
+   * 通用重试包装函数
+   */
+  async withRetry(fn, stepName, retries = 3, delay = 2000) {
+    let lastError;
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        if (i < retries - 1) {
+          logger.warn(`${stepName} 失败，${delay / 1000}秒后重试 (${i + 1}/${retries}): ${error.message}`);
+          await this.sleep(delay);
+        }
+      }
+    }
+    logger.error(`${stepName} 重试${retries}次后仍然失败`);
+    throw lastError;
+  }
+
+  /**
+   * 安全执行 evaluate（处理页面导航导致的上下文销毁，重试3次，每2秒一次）
    */
   async safeEvaluate(fn, defaultValue = null, retries = 3) {
     for (let i = 0; i < retries; i++) {
@@ -101,7 +130,8 @@ export class OpenAIRegister {
             e.message.includes('navigation') ||
             e.message.includes('Target closed')) {
           if (i < retries - 1) {
-            await this.sleep(1000);
+            logger.info(`safeEvaluate 重试 ${i + 2}/${retries}...`);
+            await this.sleep(2000);
             continue;
           }
         }
@@ -112,7 +142,7 @@ export class OpenAIRegister {
   }
 
   /**
-   * 等待元素出现并可交互（带重试）
+   * 等待元素出现并可交互（带重试，3次，每2秒一次）
    */
   async waitForElement(selector, timeout = 15000, retries = 3) {
     for (let i = 0; i < retries; i++) {
@@ -122,7 +152,7 @@ export class OpenAIRegister {
       } catch (e) {
         if (i < retries - 1) {
           logger.info(`等待元素 ${selector} 重试 ${i + 2}/${retries}...`);
-          await this.sleep(1000);
+          await this.sleep(2000);
         }
       }
     }
@@ -277,6 +307,7 @@ export class OpenAIRegister {
       if (clicked) {
         logger.success('已点击免费注册按钮');
         await this.waitForNavigation();
+        await this.sleep(3000);
       } else {
         logger.info('可能已经在登录页面');
       }
@@ -663,32 +694,102 @@ export class OpenAIRegister {
   }
 
   /**
+   * 检测页面是否显示 "We ran into an issue" 错误
+   * @returns {Promise<boolean>} 是否存在该错误
+   */
+  async checkForSignInIssue() {
+    const errorText = await this.safeEvaluate(() => {
+      const bodyText = document.body.innerText;
+      if (bodyText.includes('We ran into an issue') ||
+          bodyText.includes('please take a break') ||
+          bodyText.includes('try again soon')) {
+        return true;
+      }
+      // 也检查错误元素
+      const errorElements = document.querySelectorAll('[class*="error"], [class*="Error"], [role="alert"]');
+      for (const el of errorElements) {
+        const text = el.textContent.trim();
+        if (text.includes('We ran into an issue') || text.includes('try again')) {
+          return true;
+        }
+      }
+      return false;
+    }, false);
+
+    return errorText;
+  }
+
+  /**
    * 完成注册流程
    */
   async register(email, password, getVerificationCode) {
     try {
-      // 1. 点击 Log in
-      await this.clickLogin();
+      // 1. 点击 Log in (带重试)
+      await this.withRetry(
+        () => this.clickLogin(),
+        '点击 Log in 按钮',
+        3,
+        2000
+      );
 
-      // 2. 点击免费注册
-      await this.clickSignUp();
+      // 2. 点击免费注册 (带重试)
+      await this.withRetry(
+        () => this.clickSignUp(),
+        '点击免费注册按钮',
+        3,
+        2000
+      );
 
-      // 3. 输入邮箱
-      await this.enterEmail(email);
+      // 3. 输入邮箱 (带重试)
+      await this.withRetry(
+        () => this.enterEmail(email),
+        '输入邮箱',
+        3,
+        2000
+      );
 
-      // 4. 输入密码
-      await this.enterPassword(password);
+      // 4. 输入密码 (带重试)
+      await this.withRetry(
+        () => this.enterPassword(password),
+        '输入密码',
+        3,
+        2000
+      );
 
-      // 5. 等待并输入验证码
+      // 5. 等待并输入验证码 (带重试)
       logger.info('等待邮箱验证码...');
       const code = await getVerificationCode();
-      await this.enterVerificationCode(code);
+      await this.withRetry(
+        () => this.enterVerificationCode(code),
+        '输入验证码',
+        3,
+        2000
+      );
 
-      // 6. 输入全名和生日
-      await this.enterNameAndBirthday();
+      // 6. 输入全名和生日 (带重试)
+      await this.withRetry(
+        () => this.enterNameAndBirthday(),
+        '输入全名和生日',
+        3,
+        2000
+      );
 
-      // 7. 输入用户名
-      await this.enterUsername();
+      // 检查是否出现 "We ran into an issue" 错误
+      await this.sleep(2000);
+      const hasSignInIssue = await this.checkForSignInIssue();
+      if (hasSignInIssue) {
+        logger.error('检测到 "We ran into an issue while signing you in" 错误');
+        await this.page.screenshot({ path: this.getScreenshotPath('debug-signin-issue.png') });
+        throw new Error('We ran into an issue while signing you in, please take a break and try again soon.');
+      }
+
+      // 7. 输入用户名 (带重试)
+      await this.withRetry(
+        () => this.enterUsername(),
+        '输入用户名',
+        3,
+        2000
+      );
 
       // 8. 等待注册完成
       await this.sleep(5000);
@@ -743,6 +844,84 @@ export class OpenAIRegister {
         await this.page.screenshot({ path: this.getScreenshotPath('debug-register-error.png') });
       } catch (e) {}
       throw error;
+    }
+  }
+
+  /**
+   * 获取 Session Token (鉴权 Cookie)
+   * @returns {Promise<Object>} 包含所有相关 Cookie 的对象
+   */
+  async getSessionToken() {
+    logger.info('正在获取 Session Token...');
+
+    try {
+      // 获取所有 Cookie
+      const cookies = await this.page.cookies();
+
+      // 筛选出 OpenAI 相关的鉴权 Cookie
+      const authCookies = {};
+      const relevantDomains = ['.openai.com', '.sora.com', '.chatgpt.com', 'auth.openai.com'];
+      const relevantNames = [
+        '__Secure-next-auth.session-token',
+        '__Host-next-auth.csrf-token',
+        '__cf_bm',
+        '_cfuvid',
+        'cf_clearance',
+        'oai-did',
+        'oai-dm-tgt-c-240329',
+        '__Secure-next-auth.callback-url',
+        'ajs_anonymous_id'
+      ];
+
+      for (const cookie of cookies) {
+        // 检查是否是相关域名的 Cookie
+        const isRelevantDomain = relevantDomains.some(domain =>
+          cookie.domain.includes(domain.replace('.', '')) || cookie.domain === domain
+        );
+
+        if (isRelevantDomain) {
+          // 优先保存重要的鉴权 Cookie
+          if (relevantNames.includes(cookie.name) || cookie.name.includes('session') || cookie.name.includes('token')) {
+            authCookies[cookie.name] = {
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+              expires: cookie.expires,
+              httpOnly: cookie.httpOnly,
+              secure: cookie.secure
+            };
+          }
+        }
+      }
+
+      // 特别提取最重要的 session token
+      const sessionToken = cookies.find(c => c.name === '__Secure-next-auth.session-token');
+
+      if (sessionToken) {
+        logger.success('成功获取 Session Token');
+        logger.info(`Session Token 域名: ${sessionToken.domain}`);
+        logger.info(`Session Token 过期时间: ${new Date(sessionToken.expires * 1000).toLocaleString()}`);
+      } else {
+        logger.warn('未找到 __Secure-next-auth.session-token，可能使用其他鉴权方式');
+      }
+
+      // 返回结果
+      return {
+        sessionToken: sessionToken ? sessionToken.value : null,
+        allAuthCookies: authCookies,
+        rawCookies: cookies.filter(c =>
+          relevantDomains.some(domain =>
+            c.domain.includes(domain.replace('.', '')) || c.domain === domain
+          )
+        )
+      };
+    } catch (error) {
+      logger.error(`获取 Session Token 失败: ${error.message}`);
+      return {
+        sessionToken: null,
+        allAuthCookies: {},
+        rawCookies: []
+      };
     }
   }
 

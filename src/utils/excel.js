@@ -21,6 +21,7 @@ function sleep(ms) {
  * @param {string} account.password - 密码
  * @param {string} account.status - 状态
  * @param {string} account.createdAt - 创建时间
+ * @param {string} account.sessionToken - Session Token (可选)
  */
 export async function saveAccount(account, retries = 3) {
   for (let i = 0; i < retries; i++) {
@@ -42,6 +43,7 @@ export async function saveAccount(account, retries = 3) {
         '邮箱': account.email,
         '密码': account.password,
         '状态': account.status,
+        'Session Token': account.sessionToken || '',
         '创建时间': account.createdAt || new Date().toISOString()
       });
 
@@ -53,6 +55,7 @@ export async function saveAccount(account, retries = 3) {
         { wch: 35 },  // 邮箱
         { wch: 25 },  // 密码
         { wch: 15 },  // 状态
+        { wch: 100 }, // Session Token
         { wch: 25 }   // 创建时间
       ];
 
