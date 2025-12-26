@@ -7,6 +7,7 @@ import puppeteerCore from 'puppeteer-core';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import dotenv from 'dotenv';
 import { existsSync, mkdirSync } from 'fs';
+import { spawn } from 'child_process';
 import { TempMailService } from './modules/tempmail.js';
 import { OpenAIRegister } from './modules/register.js';
 import { saveAccount } from './utils/excel.js';
@@ -27,7 +28,10 @@ const config = {
   navigationTimeout: parseInt(process.env.NAVIGATION_TIMEOUT || '60000'),
   waitForEmailTimeout: parseInt(process.env.WAIT_FOR_EMAIL_TIMEOUT || '120000'),
   chromePath: process.env.CHROME_PATH || null,
-  screenshotDir: 'screenshots'
+  screenshotDir: 'screenshots',
+  // 调试模式配置
+  debugMode: process.env.DEBUG_MODE === 'true',
+  debugPort: parseInt(process.env.DEBUG_PORT || '9222')
 };
 
 // 确保截图目录存在
@@ -173,72 +177,109 @@ async function main() {
 
   logger.info(`配置信息:`);
   logger.info(`- 模式: 持续注册 (按 Ctrl+C 停止)`);
-  logger.info(`- 无头模式: ${config.headless}`);
+  logger.info(`- 调试模式: ${config.debugMode ? '是 (连接到已有Chrome)' : '否'}`);
+  if (!config.debugMode) {
+    logger.info(`- 无头模式: ${config.headless}`);
+  }
   logger.info(`- 慢动作延迟: ${config.slowMo}ms`);
   logger.info(`- 截图目录: ${config.screenshotDir}/`);
-  if (config.chromePath) {
+  if (config.chromePath && !config.debugMode) {
     logger.info(`- Chrome 路径: ${config.chromePath}`);
+  }
+  if (config.debugMode) {
+    logger.info(`- 调试端口: ${config.debugPort}`);
   }
 
   let browser;
   let successCount = 0;
   let failCount = 0;
   let index = 0;
+  let chromeProcess = null;
 
   try {
-    // 启动浏览器
-    logger.info('正在启动浏览器 (已启用 Stealth 模式)...');
+    // 根据模式启动或连接浏览器
+    if (config.debugMode) {
+      // 调试模式：自动启动 Chrome 并连接
+      const chromePath = config.chromePath || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      // 使用独立的配置目录，避免和正在运行的 Chrome 冲突
+      const userDataDir = 'C:\\chrome-sora-profile';
 
-    const launchOptions = {
-      headless: config.headless,
-      slowMo: config.slowMo,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--window-size=1920,1080',
-        // 反检测参数
-        '--disable-blink-features=AutomationControlled',
-        '--disable-infobars',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-breakpad',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-component-update',
-        '--disable-default-apps',
-        '--disable-features=TranslateUI',
-        '--disable-hang-monitor',
-        '--disable-ipc-flooding-protection',
-        '--disable-popup-blocking',
-        '--disable-prompt-on-repost',
-        '--disable-renderer-backgrounding',
-        '--disable-sync',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--force-color-profile=srgb',
-        '--metrics-recording-only',
-        '--password-store=basic',
-        '--use-mock-keychain',
-        '--lang=en-US,en',
-      ],
-      defaultViewport: {
-        width: 1920,
-        height: 1080
-      },
-      ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
-    };
+      logger.info('正在启动 Chrome 调试模式...');
+      logger.info(`使用配置目录: ${userDataDir}`);
+      logger.warn('提示: 如果连接失败，请关闭所有 Chrome 窗口后重试');
 
-    // 如果配置了本地 Chrome 路径，使用本地 Chrome
-    if (config.chromePath) {
-      launchOptions.executablePath = config.chromePath;
+      // 启动 Chrome 进程 - 只使用最少必要参数，保持浏览器"干净"
+      chromeProcess = spawn(chromePath, [
+        `--remote-debugging-port=${config.debugPort}`,
+        `--user-data-dir=${userDataDir}`,
+      ], {
+        detached: true,
+        stdio: 'ignore'
+      });
+
+      // 等待 Chrome 启动
+      logger.info('等待 Chrome 启动...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // 尝试连接，最多重试 5 次
+      let connected = false;
+      for (let i = 0; i < 5; i++) {
+        try {
+          browser = await puppeteerCore.connect({
+            browserURL: `http://127.0.0.1:${config.debugPort}`,
+            slowMo: config.slowMo,
+            defaultViewport: null
+          });
+          connected = true;
+          logger.success('已连接到 Chrome 浏览器');
+          break;
+        } catch (error) {
+          if (i < 4) {
+            logger.info(`连接失败，${i + 1}/5 次重试...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      }
+
+      if (!connected) {
+        logger.error('无法连接到 Chrome，请确保：');
+        logger.info('1. 关闭所有 Chrome 窗口后重试');
+        logger.info('2. 检查 CHROME_PATH 配置是否正确');
+        logger.info(`   当前路径: ${chromePath}`);
+        process.exit(1);
+      }
+    } else {
+      // 普通模式：启动新的浏览器实例
+      logger.info('正在启动浏览器 (已启用 Stealth 模式)...');
+
+      const launchOptions = {
+        headless: config.headless,
+        slowMo: config.slowMo,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--no-first-run',
+          '--window-size=1920,1080',
+          '--incognito',
+          // 关键反检测参数
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--lang=en-US,en',
+          '--disable-web-security',
+          '--allow-running-insecure-content',
+        ],
+        defaultViewport: null,
+        ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
+      };
+
+      if (config.chromePath) {
+        launchOptions.executablePath = config.chromePath;
+      }
+
+      browser = await puppeteer.launch(launchOptions);
+      logger.success('浏览器已启动');
     }
-
-    browser = await puppeteer.launch(launchOptions);
-
-    logger.success('浏览器已启动');
 
     // 持续注册直到手动停止
     while (isRunning) {
@@ -263,8 +304,20 @@ async function main() {
   } finally {
     // 关闭浏览器
     if (browser) {
-      await browser.close();
+      try {
+        await browser.close();
+      } catch (e) {}
       logger.info('浏览器已关闭');
+    }
+    // 关闭 Chrome 进程
+    if (chromeProcess) {
+      try {
+        process.kill(-chromeProcess.pid);
+      } catch (e) {
+        try {
+          chromeProcess.kill();
+        } catch (e2) {}
+      }
     }
   }
 

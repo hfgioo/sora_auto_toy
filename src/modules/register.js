@@ -222,70 +222,40 @@ export class OpenAIRegister {
     logger.step(1, '正在打开 Sora 注册页面...');
     this.page = await this.browser.newPage();
 
-    // 设置 viewport
-    await this.page.setViewport({ width: 1920, height: 1080 });
-
     // 设置超时
     this.page.setDefaultTimeout(30000);
     this.page.setDefaultNavigationTimeout(60000);
 
-    // 设置更真实的 User-Agent
-    await this.page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
-
-    // 设置额外的 HTTP 头
-    await this.page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1'
-    });
-
-    // 注入反检测脚本
-    await this.page.evaluateOnNewDocument(() => {
-      // 覆盖 webdriver 属性
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined
-      });
-
-      // 覆盖 plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
-      });
-
-      // 覆盖 languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en']
-      });
-
-      // 覆盖 chrome 对象
-      window.chrome = {
-        runtime: {}
-      };
-
-      // 覆盖权限查询
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-    });
+    // 不设置任何自定义 User-Agent 或 HTTP 头，保持浏览器原生状态
 
     await this.page.goto('https://sora.com/', {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
-    await this.sleep(3000);
+    // 等待页面完全加载
+    await this.page.waitForFunction(
+      () => document.readyState === 'complete',
+      { timeout: 30000 }
+    );
+
+    // 等待 Log in 按钮出现，确保页面渲染完成
+    logger.info('等待页面渲染完成...');
+    await this.page.waitForFunction(
+      () => {
+        const elements = document.querySelectorAll('button, a');
+        for (const el of elements) {
+          const text = el.textContent.trim().toLowerCase();
+          if (text === 'log in' || text === '登录') {
+            return true;
+          }
+        }
+        return false;
+      },
+      { timeout: 30000 }
+    );
+
+    await this.sleep(1000);
     logger.success('Sora 页面已打开');
   }
 
@@ -296,9 +266,6 @@ export class OpenAIRegister {
     logger.step(2, '正在点击 Log in 按钮...');
 
     try {
-      // 等待按钮出现
-      await this.page.waitForSelector('button, a', { visible: true, timeout: 10000 });
-
       // 点击 Log in 按钮
       const clicked = await this.safeEvaluate(() => {
         const elements = document.querySelectorAll('button, a');
