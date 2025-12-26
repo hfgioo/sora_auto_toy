@@ -848,15 +848,69 @@ export class OpenAIRegister {
   }
 
   /**
-   * 获取 Session Token (鉴权 Cookie)
-   * @returns {Promise<Object>} 包含所有相关 Cookie 的对象
+   * 获取 Session Token 和 Refresh Token
+   * @returns {Promise<Object>} 包含所有相关 Cookie 和 Token 的对象
    */
   async getSessionToken() {
-    logger.info('正在获取 Session Token...');
+    logger.info('正在获取 Session Token 和 Refresh Token...');
 
     try {
       // 获取所有 Cookie
       const cookies = await this.page.cookies();
+
+      // 从 localStorage 获取 token（包括 refresh token）
+      const localStorageData = await this.safeEvaluate(() => {
+        const data = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          // 获取所有可能包含 token 的 key
+          if (key.includes('token') || key.includes('Token') ||
+              key.includes('auth') || key.includes('Auth') ||
+              key.includes('session') || key.includes('Session') ||
+              key.includes('refresh') || key.includes('Refresh') ||
+              key.includes('access') || key.includes('Access') ||
+              key.includes('oai') || key.includes('openai')) {
+            try {
+              const value = localStorage.getItem(key);
+              // 尝试解析 JSON
+              try {
+                data[key] = JSON.parse(value);
+              } catch {
+                data[key] = value;
+              }
+            } catch (e) {
+              // 忽略无法读取的项
+            }
+          }
+        }
+        return data;
+      }, {});
+
+      // 从 sessionStorage 获取 token
+      const sessionStorageData = await this.safeEvaluate(() => {
+        const data = {};
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key.includes('token') || key.includes('Token') ||
+              key.includes('auth') || key.includes('Auth') ||
+              key.includes('session') || key.includes('Session') ||
+              key.includes('refresh') || key.includes('Refresh') ||
+              key.includes('access') || key.includes('Access') ||
+              key.includes('oai') || key.includes('openai')) {
+            try {
+              const value = sessionStorage.getItem(key);
+              try {
+                data[key] = JSON.parse(value);
+              } catch {
+                data[key] = value;
+              }
+            } catch (e) {
+              // 忽略无法读取的项
+            }
+          }
+        }
+        return data;
+      }, {});
 
       // 筛选出 OpenAI 相关的鉴权 Cookie
       const authCookies = {};
@@ -905,10 +959,62 @@ export class OpenAIRegister {
         logger.warn('未找到 __Secure-next-auth.session-token，可能使用其他鉴权方式');
       }
 
+      // 尝试从 localStorage 提取 refresh token
+      let refreshToken = null;
+      for (const [key, value] of Object.entries(localStorageData)) {
+        if (key.toLowerCase().includes('refresh')) {
+          if (typeof value === 'string') {
+            refreshToken = value;
+          } else if (value && value.refreshToken) {
+            refreshToken = value.refreshToken;
+          } else if (value && value.refresh_token) {
+            refreshToken = value.refresh_token;
+          }
+          if (refreshToken) {
+            logger.success(`成功获取 Refresh Token (来自 localStorage: ${key})`);
+            break;
+          }
+        }
+      }
+
+      // 如果 localStorage 没有，尝试从 sessionStorage 获取
+      if (!refreshToken) {
+        for (const [key, value] of Object.entries(sessionStorageData)) {
+          if (key.toLowerCase().includes('refresh')) {
+            if (typeof value === 'string') {
+              refreshToken = value;
+            } else if (value && value.refreshToken) {
+              refreshToken = value.refreshToken;
+            } else if (value && value.refresh_token) {
+              refreshToken = value.refresh_token;
+            }
+            if (refreshToken) {
+              logger.success(`成功获取 Refresh Token (来自 sessionStorage: ${key})`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (!refreshToken) {
+        logger.warn('未找到 Refresh Token');
+      }
+
+      // 记录找到的所有 storage 数据
+      if (Object.keys(localStorageData).length > 0) {
+        logger.info(`localStorage 中找到 ${Object.keys(localStorageData).length} 个相关项`);
+      }
+      if (Object.keys(sessionStorageData).length > 0) {
+        logger.info(`sessionStorage 中找到 ${Object.keys(sessionStorageData).length} 个相关项`);
+      }
+
       // 返回结果
       return {
         sessionToken: sessionToken ? sessionToken.value : null,
+        refreshToken: refreshToken,
         allAuthCookies: authCookies,
+        localStorage: localStorageData,
+        sessionStorage: sessionStorageData,
         rawCookies: cookies.filter(c =>
           relevantDomains.some(domain =>
             c.domain.includes(domain.replace('.', '')) || c.domain === domain
@@ -916,10 +1022,13 @@ export class OpenAIRegister {
         )
       };
     } catch (error) {
-      logger.error(`获取 Session Token 失败: ${error.message}`);
+      logger.error(`获取 Token 失败: ${error.message}`);
       return {
         sessionToken: null,
+        refreshToken: null,
         allAuthCookies: {},
+        localStorage: {},
+        sessionStorage: {},
         rawCookies: []
       };
     }

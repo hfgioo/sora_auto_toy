@@ -97,6 +97,7 @@ async function registerOne(browser, index) {
   let password = config.defaultPassword || generatePassword();
   let status = '失败';
   let sessionToken = null;
+  let refreshToken = null;
 
   try {
     // 1. 获取临时邮箱
@@ -115,13 +116,17 @@ async function registerOne(browser, index) {
       status = '成功';
       logger.success(`账户 ${email} 注册成功！`);
 
-      // 4. 获取 Session Token
+      // 4. 获取 Session Token 和 Refresh Token
       const tokenResult = await register.getSessionToken();
       if (tokenResult.sessionToken) {
         sessionToken = tokenResult.sessionToken;
         logger.success(`已获取 Session Token (长度: ${sessionToken.length})`);
       } else {
         logger.warn('未能获取 Session Token，但账户注册成功');
+      }
+      if (tokenResult.refreshToken) {
+        refreshToken = tokenResult.refreshToken;
+        logger.success(`已获取 Refresh Token (长度: ${refreshToken.length})`);
       }
     }
   } catch (error) {
@@ -135,6 +140,7 @@ async function registerOne(browser, index) {
         password,
         status,
         sessionToken,
+        refreshToken,
         createdAt: new Date().toISOString()
       });
     }
