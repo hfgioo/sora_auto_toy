@@ -796,15 +796,8 @@ export class OpenAIRegister {
         throw new Error('We ran into an issue while signing you in, please take a break and try again soon.');
       }
 
-      // 7. 输入用户名 (带重试)
-      await this.withRetry(
-        () => this.enterUsername(),
-        '输入用户名',
-        3,
-        2000
-      );
-
-      // 8. 等待注册完成
+      // 7. 等待页面跳转（Sora 现在不需要填写用户名了）
+      logger.info('等待页面跳转...');
       await this.sleep(5000);
 
       // 截图保存最终状态
@@ -1069,7 +1062,14 @@ export class OpenAIRegister {
    */
   async close() {
     if (this.page) {
-      await this.page.close();
+      try {
+        // 检查页面是否还有效
+        if (!this.page.isClosed()) {
+          await this.page.close();
+        }
+      } catch (e) {
+        // 忽略关闭错误
+      }
       this.page = null;
     }
   }

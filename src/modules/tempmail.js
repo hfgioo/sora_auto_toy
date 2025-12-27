@@ -410,7 +410,14 @@ export class TempMailService {
    */
   async close() {
     if (this.page) {
-      await this.page.close();
+      try {
+        // 检查页面是否还有效
+        if (!this.page.isClosed()) {
+          await this.page.close();
+        }
+      } catch (e) {
+        // 忽略关闭错误
+      }
       this.page = null;
     }
   }
