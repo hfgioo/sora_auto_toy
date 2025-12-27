@@ -2,9 +2,9 @@
  * Sora 自动化注册工具
  * 主程序入口
  */
-import puppeteerExtra from 'puppeteer-extra';
 import puppeteerCore from 'puppeteer-core';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { addExtra } from 'puppeteer-extra';
 import dotenv from 'dotenv';
 import { existsSync, mkdirSync } from 'fs';
 import { spawn } from 'child_process';
@@ -13,8 +13,8 @@ import { OpenAIRegister } from './modules/register.js';
 import { saveAccount } from './utils/excel.js';
 import { logger } from './utils/logger.js';
 
-// 使用 puppeteer-core 作为基础
-const puppeteer = puppeteerExtra.use(StealthPlugin());
+// 让 puppeteer-extra 使用 puppeteer-core
+const puppeteer = addExtra(puppeteerCore);
 puppeteer.use(StealthPlugin());
 
 // 加载环境变量
@@ -76,15 +76,27 @@ function generatePassword() {
  */
 async function clearBrowserData(browser) {
   try {
-    const pages = await browser.pages();
-    for (const page of pages) {
+    // 先检查浏览器是否还连接着
+    if (!browser.isConnected()) {
+      logger.warn('浏览器已断开连接，跳过清除缓存');
+      return false;
+    }
+
+    // 创建一个新页面来执行清除操作
+    const page = await browser.newPage();
+    try {
       const client = await page.target().createCDPSession();
       await client.send('Network.clearBrowserCookies');
       await client.send('Network.clearBrowserCache');
+      await client.detach();
+      logger.info('已清除浏览器缓存和 Cookie');
+    } finally {
+      await page.close();
     }
-    logger.info('已清除浏览器缓存和 Cookie');
+    return true;
   } catch (error) {
     logger.warn(`清除缓存时出错: ${error.message}`);
+    return false;
   }
 }
 
@@ -152,9 +164,18 @@ async function registerOne(browser, index) {
       });
     }
 
-    // 关闭页面
-    await tempMail.close();
-    await register.close();
+    // 安全关闭页面
+    try {
+      await tempMail.close();
+    } catch (e) {
+      logger.warn(`关闭临时邮箱页面时出错: ${e.message}`);
+    }
+    
+    try {
+      await register.close();
+    } catch (e) {
+      logger.warn(`关闭注册页面时出错: ${e.message}`);
+    }
   }
 
   return status === '成功';
@@ -225,7 +246,7 @@ async function main() {
       let connected = false;
       for (let i = 0; i < 5; i++) {
         try {
-          browser = await puppeteerCore.connect({
+          browser = await puppeteer.connect({
             browserURL: `http://127.0.0.1:${config.debugPort}`,
             slowMo: config.slowMo,
             defaultViewport: null
@@ -256,18 +277,12 @@ async function main() {
         headless: config.headless,
         slowMo: config.slowMo,
         args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
           '--no-first-run',
           '--window-size=1920,1080',
-          '--incognito',
           // 关键反检测参数
           '--disable-blink-features=AutomationControlled',
           '--disable-features=IsolateOrigins,site-per-process',
           '--lang=en-US,en',
-          '--disable-web-security',
-          '--allow-running-insecure-content',
         ],
         defaultViewport: null,
         ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
@@ -294,7 +309,66 @@ async function main() {
 
       // 如果还要继续，清除缓存并等待
       if (isRunning) {
-        await clearBrowserData(browser);
+        // 检查浏览器是否还连接着
+        if (!browser.isConnected()) {
+          logger.warn('浏览器连接已断开，正在重新启动...');
+          // 重新启动浏览器
+          if (config.debugMode) {
+            // 调试模式：重新连接
+            let reconnected = false;
+            for (let i = 0; i < 5; i++) {
+              try {
+                browser = await puppeteer.connect({
+                  browserURL: `http://127.0.0.1:${config.debugPort}`,
+                  slowMo: config.slowMo,
+                  defaultViewport: null
+                });
+                reconnected = true;
+                logger.success('已重新连接到 Chrome 浏览器');
+                break;
+              } catch (error) {
+                if (i < 4) {
+                  logger.info(`重新连接失败，${i + 1}/5 次重试...`);
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+              }
+            }
+            if (!reconnected) {
+              logger.error('无法重新连接到浏览器，停止运行');
+              break;
+            }
+          } else {
+            // 普通模式：重新启动
+            const launchOptions = {
+              headless: config.headless,
+              slowMo: config.slowMo,
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--no-first-run',
+                '--window-size=1920,1080',
+                '--incognito',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--lang=en-US,en',
+                '--disable-web-security',
+                '--allow-running-insecure-content',
+              ],
+              defaultViewport: null,
+              ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection']
+            };
+            if (config.chromePath) {
+              launchOptions.executablePath = config.chromePath;
+            }
+            browser = await puppeteer.launch(launchOptions);
+            logger.success('浏览器已重新启动');
+          }
+        } else {
+          // 浏览器还在，清除缓存
+          await clearBrowserData(browser);
+        }
+        
         logger.info('等待 5 秒后继续下一个注册...');
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
