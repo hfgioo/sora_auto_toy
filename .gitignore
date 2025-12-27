@@ -7,6 +7,9 @@ package-lock.json
 
 # 账户数据 (敏感信息)
 accounts.xlsx
+access_tokens.json
+session_tokens.json
+tokens.json
 
 # 日志文件
 *.log
